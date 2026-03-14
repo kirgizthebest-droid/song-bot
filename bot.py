@@ -166,7 +166,7 @@ async def callback_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
 Настроение: {u.get('mood')}
 """
 
-        # ---- Suno API ----
+        # ---- Suno API (новый endpoint) ----
         headers = {
             "Authorization": f"Bearer {SUNO_API_KEY}",
             "Content-Type": "application/json"
@@ -177,17 +177,28 @@ async def callback_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "format": "mp3"
         }
 
-        try:
-            response = requests.post("https://api.suno.ai/v1/text-to-music", json=payload, headers=headers, timeout=60)
-            response.raise_for_status()
-            data = response.json()
-            audio_url = data.get("audio_url") or data.get("url")
-            if audio_url:
-                await query.message.reply_audio(audio_url, caption="Вот твоя песня! 🎵")
-            else:
-                await query.message.reply_text("Ошибка Suno: аудио не получено. Попробуй позже.")
-        except requests.exceptions.RequestException as e:
-            await query.message.reply_text(f"Сервис Suno временно недоступен. Попробуй позже.\n{e}")
+        # ---- Попытка 3 раза если Suno недоступен ----
+        for attempt in range(3):
+            try:
+                response = requests.post("https://api.sunoapi.org/api/v1/generate", json=payload, headers=headers, timeout=60)
+                response.raise_for_status()
+                data = response.json()
+                audio_url = data.get("audio_url") or data.get("url")
+                if audio_url:
+                    await query.message.reply_audio(audio_url, caption="Вот твоя песня! 🎵")
+                    break
+                else:
+                    if attempt < 2:
+                        await query.message.reply_text("Сервис Suno временно недоступен. Повторная попытка...")
+                        await asyncio.sleep(5)
+                    else:
+                        await query.message.reply_text("Сервис Suno временно недоступен. Попробуй позже.")
+            except requests.exceptions.RequestException:
+                if attempt < 2:
+                    await query.message.reply_text("Сервис Suno временно недоступен. Повторная попытка...")
+                    await asyncio.sleep(5)
+                else:
+                    await query.message.reply_text("Сервис Suno временно недоступен. Попробуй позже.")
 
         users[user_id]["step"] = None
 
@@ -235,4 +246,5 @@ async def main():
         await asyncio.sleep(3600)
 
 if __name__ == "__main__":
+    asyncio.run(main())
     asyncio.run(main())
