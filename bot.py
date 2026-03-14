@@ -1,6 +1,7 @@
 import os
 import asyncio
 import aiohttp
+import json
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
@@ -12,7 +13,20 @@ SUNO_API_KEY = os.getenv("SUNO_API_KEY")
 ROBOKASSA_LOGIN = os.getenv("ROBOKASSA_LOGIN")
 ROBOKASSA_PASS1 = os.getenv("ROBOKASSA_PASS1")
 
-users = {}
+USERS_FILE = "users.json"
+
+# ----- Работа с файлом -----
+def load_users():
+    if os.path.exists(USERS_FILE):
+        with open(USERS_FILE, "r") as f:
+            return json.load(f)
+    return {}
+
+def save_users(users):
+    with open(USERS_FILE, "w") as f:
+        json.dump(users, f)
+
+users = load_users()
 
 PACKAGES = {
     "1": 249,
@@ -21,11 +35,13 @@ PACKAGES = {
     "50": 7999
 }
 
-# ----- Старт -----
+# ----- Команда /start -----
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.message.from_user.id
+    user_id = str(update.message.from_user.id)
     if user_id not in users:
         users[user_id] = {"remaining": 1}
+        save_users(users)
+
     keyboard = [[InlineKeyboardButton("🎵 Создать песню", callback_data="create_song")]]
     text = f"""🎵 Привет!
 
@@ -35,14 +51,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 Нажми кнопку ниже чтобы начать."""
     await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
 
-
-# ----- Выбор типа получателя -----
+# ----- Кнопки типа получателя -----
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    user_id = query.from_user.id
+    user_id = str(query.from_user.id)
+
     if user_id not in users:
         users[user_id] = {"remaining": 1}
+        save_users(users)
 
     if query.data == "create_song":
         if users[user_id]["remaining"] <= 0:
@@ -55,15 +72,14 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("🎉 Для компании / команды", callback_data="company")],
             [InlineKeyboardButton("✨ Другое", callback_data="other")]
         ]
-        await query.message.reply_text(
-            "Для кого будет песня?",
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
+        await query.message.reply_text("Для кого будет песня?", reply_markup=InlineKeyboardMarkup(keyboard))
         return
 
     if query.data in ["lover","friend","wedding","company","other"]:
         users[user_id]["recipient_type"] = query.data
         users[user_id]["step"] = "name"
+        save_users(users)
+
         if query.data == "wedding":
             await query.message.reply_text("Как зовут пару?\nПример: Оля и Дима")
         elif query.data == "company":
@@ -71,18 +87,19 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await query.message.reply_text("Как зовут человека?\nПример: Оля")
 
-
-# ----- Обработка текстовых ответов -----
+# ----- Обработка текстовых сообщений -----
 async def messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.message.from_user.id
+    user_id = str(update.message.from_user.id)
     if user_id not in users:
-        users[user_id] = {"remaining":1}
+        users[user_id] = {"remaining": 1}
+
     step = users[user_id].get("step")
     text = update.message.text
 
     if step == "name":
         users[user_id]["name"] = text
         users[user_id]["step"] = "occasion"
+        save_users(users)
         keyboard = [
             [InlineKeyboardButton("🎂 День рождения", callback_data="birthday")],
             [InlineKeyboardButton("💍 Свадьба", callback_data="wedding_occasion")],
@@ -91,15 +108,13 @@ async def messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("🙏 Благодарность", callback_data="thanks")],
             [InlineKeyboardButton("🎉 Праздник / событие", callback_data="event")]
         ]
-        await update.message.reply_text(
-            "Какой повод для песни?",
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
+        await update.message.reply_text("Какой повод для песни?", reply_markup=InlineKeyboardMarkup(keyboard))
         return
 
     if step == "description":
         users[user_id]["description"] = text
         users[user_id]["step"] = "style"
+        save_users(users)
         keyboard = [
             [InlineKeyboardButton("Поп", callback_data="style_pop")],
             [InlineKeyboardButton("Рэп", callback_data="style_rap")],
@@ -108,19 +123,17 @@ async def messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("Весёлая песня", callback_data="style_fun")],
             [InlineKeyboardButton("Современный хит", callback_data="style_hit")]
         ]
-        await update.message.reply_text(
-            "Выберите стиль песни",
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
+        await update.message.reply_text("Выберите стиль песни", reply_markup=InlineKeyboardMarkup(keyboard))
 
-
-# ----- Подробности: повод, стиль, настроение -----
+# ----- Детали: повод, стиль, настроение -----
 async def callback_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    user_id = query.from_user.id
+    user_id = str(query.from_user.id)
+
     if user_id not in users:
-        users[user_id] = {"remaining":1}
+        users[user_id] = {"remaining": 1}
+    save_users(users)
 
     data = query.data
 
@@ -128,6 +141,7 @@ async def callback_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data in ["birthday","wedding_occasion","love","funny","thanks","event"]:
         users[user_id]["occasion"] = data
         users[user_id]["step"] = "description"
+        save_users(users)
         await query.message.reply_text("Расскажи немного о человеке / паре / компании")
         return
 
@@ -135,6 +149,7 @@ async def callback_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data.startswith("style_"):
         users[user_id]["style"] = data.replace("style_","")
         users[user_id]["step"] = "mood"
+        save_users(users)
         keyboard = [
             [InlineKeyboardButton("❤️ Романтичная", callback_data="mood_romantic")],
             [InlineKeyboardButton("🥹 Трогательная", callback_data="mood_touching")],
@@ -142,22 +157,21 @@ async def callback_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("🔥 Энергичная", callback_data="mood_energy")],
             [InlineKeyboardButton("✨ Другое", callback_data="mood_other")]
         ]
-        await query.message.reply_text(
-            "Настроение песни?",
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
+        await query.message.reply_text("Настроение песни?", reply_markup=InlineKeyboardMarkup(keyboard))
         return
 
     # настроение и генерация
     if data.startswith("mood_"):
         users[user_id]["mood"] = data.replace("mood_","")
+        save_users(users)
 
         if users[user_id]["remaining"] <= 0:
-            await offer_packages(query,user_id)
+            await offer_packages(query, user_id)
             return
-        users[user_id]["remaining"] -= 1
 
-        # формируем промт
+        users[user_id]["remaining"] -= 1
+        save_users(users)
+
         u = users[user_id]
         prompt_text = f"""
 Создай песню:
@@ -169,13 +183,12 @@ async def callback_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
 Настроение: {u.get('mood')}
 """
 
-        # ---- Suno API через aiohttp ----
         async with aiohttp.ClientSession() as session:
             for attempt in range(5):
                 try:
                     async with session.post(
                         "https://api.sunoapi.org/api/v1/generate",
-                        json={"prompt":prompt_text,"voice":"default","format":"mp3"},
+                        json={"prompt": prompt_text, "voice":"default", "format":"mp3"},
                         headers={"Authorization": f"Bearer {SUNO_API_KEY}"}
                     ) as resp:
                         if resp.status == 200:
@@ -190,7 +203,7 @@ async def callback_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                 await asyncio.sleep(15)
                             else:
                                 await query.message.reply_text("Suno временно недоступен. Попробуй позже.")
-                except Exception as e:
+                except Exception:
                     if attempt < 4:
                         await query.message.reply_text("Suno временно недоступен. Повторная попытка через 15 секунд...")
                         await asyncio.sleep(15)
@@ -198,7 +211,7 @@ async def callback_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         await query.message.reply_text("Suno временно недоступен. Попробуй позже.")
 
         users[user_id]["step"] = None
-
+        save_users(users)
 
 # ----- Предложение купить пакет -----
 async def offer_packages(query, user_id):
@@ -208,11 +221,7 @@ async def offer_packages(query, user_id):
         [InlineKeyboardButton(f"10 песен – {PACKAGES['10']}₽", callback_data="buy_10")],
         [InlineKeyboardButton(f"50 песен – {PACKAGES['50']}₽", callback_data="buy_50")]
     ]
-    await query.message.reply_text(
-        "У тебя закончились бесплатные генерации. Выбери пакет:",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
-
+    await query.message.reply_text("У тебя закончились бесплатные генерации. Выбери пакет:", reply_markup=InlineKeyboardMarkup(keyboard))
 
 # ----- Robokassa -----
 def get_robokassa_link(user_id, package):
@@ -220,16 +229,14 @@ def get_robokassa_link(user_id, package):
     invoice_id = f"{user_id}_{package}"
     return f"https://auth.robokassa.ru/Merchant/Index.aspx?MrchLogin={ROBOKASSA_LOGIN}&OutSum={price}&InvId={invoice_id}&Desc=Пакет песен {package}&SignatureValue={ROBOKASSA_PASS1}"
 
-
 async def package_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    user_id = query.from_user.id
+    user_id = str(query.from_user.id)
     if query.data.startswith("buy_"):
         package = query.data.split("_")[1]
         link = get_robokassa_link(user_id, package)
         await query.message.reply_text(f"Оплатите пакет здесь: {link}")
-
 
 # ----- Запуск -----
 async def main():
@@ -245,7 +252,6 @@ async def main():
     await app.updater.start_polling()
     while True:
         await asyncio.sleep(3600)
-
 
 if __name__ == "__main__":
     asyncio.run(main())
