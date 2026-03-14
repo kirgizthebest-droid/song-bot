@@ -3,16 +3,13 @@ import asyncio
 import requests
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    Application, CommandHandler, CallbackQueryHandler, MessageHandler,
-    filters, ContextTypes
-
-
+    Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 )
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+SUNO_API_KEY = os.getenv("SUNO_API_KEY")
 ROBOKASSA_LOGIN = os.getenv("ROBOKASSA_LOGIN")
 ROBOKASSA_PASS1 = os.getenv("ROBOKASSA_PASS1")
-SUNO_API_KEY = os.getenv("SUNO_API_KEY")
 
 users = {}
 
@@ -23,7 +20,7 @@ PACKAGES = {
     "50": 7999
 }
 
-# Старт
+# ----- Старт -----
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     if user_id not in users:
@@ -37,8 +34,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 Нажми кнопку ниже чтобы начать."""
     await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
 
-
-# Выбор типа получателя
+# ----- Выбор типа получателя -----
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -73,8 +69,7 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await query.message.reply_text("Как зовут человека?\nПример: Оля")
 
-
-# Обработка текстовых ответов
+# ----- Обработка текстовых ответов -----
 async def messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     if user_id not in users:
@@ -115,8 +110,7 @@ async def messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
 
-
-# Подробности: повод, стиль, настроение
+# ----- Подробности: повод, стиль, настроение -----
 async def callback_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -172,31 +166,32 @@ async def callback_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
 Настроение: {u.get('mood')}
 """
 
-        # Генерация через Suno API
+        # ---- Suno API ----
         headers = {
             "Authorization": f"Bearer {SUNO_API_KEY}",
             "Content-Type": "application/json"
         }
-        data = {
+        payload = {
             "prompt": prompt_text,
-            "voice": "default",  # можно изменить
+            "voice": "default",
             "format": "mp3"
         }
 
-        response = requests.post("https://api.suno.ai/generate", json=data, headers=headers)
-        if response.status_code == 200:
-            audio_url = response.json().get("url")
+        try:
+            response = requests.post("https://api.suno.ai/v1/text-to-music", json=payload, headers=headers, timeout=60)
+            response.raise_for_status()
+            data = response.json()
+            audio_url = data.get("audio_url") or data.get("url")
             if audio_url:
                 await query.message.reply_audio(audio_url, caption="Вот твоя песня! 🎵")
             else:
-                await query.message.reply_text("Ошибка Suno: не получен аудио файл.")
-        else:
-            await query.message.reply_text(f"Ошибка Suno: {response.text}")
+                await query.message.reply_text("Ошибка Suno: аудио не получено. Попробуй позже.")
+        except requests.exceptions.RequestException as e:
+            await query.message.reply_text(f"Сервис Suno временно недоступен. Попробуй позже.\n{e}")
 
         users[user_id]["step"] = None
 
-
-# Предложение купить пакет
+# ----- Предложение купить пакет -----
 async def offer_packages(query, user_id):
     keyboard = [
         [InlineKeyboardButton(f"1 песня – {PACKAGES['1']}₽", callback_data="buy_1")],
@@ -209,13 +204,12 @@ async def offer_packages(query, user_id):
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
-# Robokassa ссылка
+# ----- Robokassa -----
 def get_robokassa_link(user_id, package):
     price = PACKAGES[package]
     invoice_id = f"{user_id}_{package}"
     return f"https://auth.robokassa.ru/Merchant/Index.aspx?MrchLogin={ROBOKASSA_LOGIN}&OutSum={price}&InvId={invoice_id}&Desc=Пакет песен {package}&SignatureValue={ROBOKASSA_PASS1}"
 
-# Обработка покупки
 async def package_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -225,7 +219,7 @@ async def package_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE):
         link = get_robokassa_link(user_id, package)
         await query.message.reply_text(f"Оплатите пакет здесь: {link}")
 
-# Запуск
+# ----- Запуск -----
 async def main():
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
