@@ -1,4 +1,5 @@
 import os
+import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 
@@ -12,35 +13,35 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text = (
         "🎵 Привет!\n\n"
-        "Я создаю персональные песни.\n\n"
-        "Первая песня бесплатно.\n"
-        "Ответь на несколько вопросов и я создам песню."
+        "Я создаю персональные песни.\n"
+        "Первая песня бесплатно.\n\n"
+        "Нажми кнопку ниже чтобы создать песню."
     )
 
     await update.message.reply_text(text, reply_markup=reply_markup)
 
 
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
     query = update.callback_query
     await query.answer()
 
-    if query.data == "create_song":
+    keyboard = [
+        [InlineKeyboardButton("❤️ Для любимого человека", callback_data="lover")],
+        [InlineKeyboardButton("🎂 Для друга", callback_data="friend")],
+        [InlineKeyboardButton("💍 Свадебная песня", callback_data="wedding")],
+        [InlineKeyboardButton("🎉 Для компании", callback_data="company")],
+        [InlineKeyboardButton("✨ Другое", callback_data="other")]
+    ]
 
-        keyboard = [
-            [InlineKeyboardButton("❤️ Для любимого человека", callback_data="lover")],
-            [InlineKeyboardButton("🎂 Для друга", callback_data="friend")],
-            [InlineKeyboardButton("💍 Свадебная песня", callback_data="wedding")],
-            [InlineKeyboardButton("🎉 Для компании", callback_data="company")],
-            [InlineKeyboardButton("✨ Другое", callback_data="other")],
-        ]
-
-        await query.message.reply_text(
-            "Для кого будет песня?",
-            reply_markup=InlineKeyboardMarkup(keyboard),
-        )
+    await query.message.reply_text(
+        "Для кого будет песня?",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
     user_id = update.message.from_user.id
 
     if user_id not in user_data_store:
@@ -49,26 +50,31 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
 
     if "name" not in user_data_store[user_id]:
+
         user_data_store[user_id]["name"] = text
         await update.message.reply_text("Какой повод для песни?")
         return
 
     if "occasion" not in user_data_store[user_id]:
+
         user_data_store[user_id]["occasion"] = text
-        await update.message.reply_text("Расскажи немного о человеке")
+        await update.message.reply_text("Расскажи немного о человеке / паре")
         return
 
     if "description" not in user_data_store[user_id]:
+
         user_data_store[user_id]["description"] = text
-        await update.message.reply_text("Выбери стиль песни: Поп / Рэп / Рок")
+        await update.message.reply_text("Стиль песни? (Поп / Рэп / Рок)")
         return
 
     if "style" not in user_data_store[user_id]:
+
         user_data_store[user_id]["style"] = text
-        await update.message.reply_text("Какое настроение песни?")
+        await update.message.reply_text("Настроение песни?")
         return
 
     if "mood" not in user_data_store[user_id]:
+
         user_data_store[user_id]["mood"] = text
 
         data = user_data_store[user_id]
@@ -84,11 +90,11 @@ Mood: {data['mood']}
 """
 
         await update.message.reply_text(
-            "🎵 Песня создается...\n\nВот промт для Suno:\n\n" + prompt
+            "🎵 Песня создается...\n\nПромт для Suno:\n" + prompt
         )
 
 
-def main():
+async def main():
 
     app = Application.builder().token(TOKEN).build()
 
@@ -98,8 +104,15 @@ def main():
 
     print("Bot started")
 
-    app.run_polling()
+    await app.initialize()
+    await app.start()
+    await app.updater.start_polling()
+
+    while True:
+        await asyncio.sleep(3600)
 
 
+if __name__ == "__main__":
+    asyncio.run(main())
 if __name__ == "__main__":
     main()
