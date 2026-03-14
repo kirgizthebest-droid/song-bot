@@ -1,37 +1,55 @@
 import os
 import asyncio
+import requests
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler, MessageHandler,
     filters, ContextTypes
+
+
 )
 
-TOKEN = os.getenv("BOT_TOKEN")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+ROBOKASSA_LOGIN = os.getenv("ROBOKASSA_LOGIN")
+ROBOKASSA_PASS1 = os.getenv("ROBOKASSA_PASS1")
+SUNO_API_KEY = os.getenv("SUNO_API_KEY")
 
-# хранилище данных пользователей
 users = {}
 
-# старт бота
+PACKAGES = {
+    "1": 249,
+    "3": 699,
+    "10": 1999,
+    "50": 7999
+}
+
+# Старт
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    if user_id not in users:
+        users[user_id] = {"remaining": 1}
     keyboard = [[InlineKeyboardButton("🎵 Создать песню", callback_data="create_song")]]
-    text = """🎵 Привет!
+    text = f"""🎵 Привет!
+
 Я создаю персональные песни.
-Первая песня — бесплатно.
+У тебя {users[user_id]['remaining']} бесплатная генерация.
+
 Нажми кнопку ниже чтобы начать."""
     await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
 
 
-# обработка кнопок
+# Выбор типа получателя
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     user_id = query.from_user.id
-
     if user_id not in users:
-        users[user_id] = {}
+        users[user_id] = {"remaining": 1}
 
-    # кнопка Создать песню
     if query.data == "create_song":
+        if users[user_id]["remaining"] <= 0:
+            await offer_packages(query, user_id)
+            return
         keyboard = [
             [InlineKeyboardButton("❤️ Для любимого человека", callback_data="lover")],
             [InlineKeyboardButton("🎂 Для друга", callback_data="friend")],
@@ -45,11 +63,9 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # кнопки типа получателя
-    if query.data in ["lover", "friend", "wedding", "company", "other"]:
+    if query.data in ["lover","friend","wedding","company","other"]:
         users[user_id]["recipient_type"] = query.data
         users[user_id]["step"] = "name"
-
         if query.data == "wedding":
             await query.message.reply_text("Как зовут пару?\nПример: Оля и Дима")
         elif query.data == "company":
@@ -58,27 +74,24 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.reply_text("Как зовут человека?\nПример: Оля")
 
 
-# обработка сообщений (текстовые ответы)
+# Обработка текстовых ответов
 async def messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     if user_id not in users:
-        users[user_id] = {}
-
+        users[user_id] = {"remaining":1}
     step = users[user_id].get("step")
     text = update.message.text
 
-    # шаг "имя"
     if step == "name":
         users[user_id]["name"] = text
         users[user_id]["step"] = "occasion"
-        # вопрос о поводе
         keyboard = [
             [InlineKeyboardButton("🎂 День рождения", callback_data="birthday")],
             [InlineKeyboardButton("💍 Свадьба", callback_data="wedding_occasion")],
             [InlineKeyboardButton("❤️ Признание в любви", callback_data="love")],
             [InlineKeyboardButton("😂 Шуточная песня", callback_data="funny")],
             [InlineKeyboardButton("🙏 Благодарность", callback_data="thanks")],
-            [InlineKeyboardButton("🎉 Праздник / событие", callback_data="event")],
+            [InlineKeyboardButton("🎉 Праздник / событие", callback_data="event")]
         ]
         await update.message.reply_text(
             "Какой повод для песни?",
@@ -86,55 +99,50 @@ async def messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # шаг "описание"
     if step == "description":
         users[user_id]["description"] = text
         users[user_id]["step"] = "style"
-        # вопрос стиль
         keyboard = [
             [InlineKeyboardButton("Поп", callback_data="style_pop")],
             [InlineKeyboardButton("Рэп", callback_data="style_rap")],
             [InlineKeyboardButton("Рок", callback_data="style_rock")],
             [InlineKeyboardButton("Душевная баллада", callback_data="style_ballad")],
             [InlineKeyboardButton("Весёлая песня", callback_data="style_fun")],
-            [InlineKeyboardButton("Современный хит", callback_data="style_hit")],
+            [InlineKeyboardButton("Современный хит", callback_data="style_hit")]
         ]
         await update.message.reply_text(
             "Выберите стиль песни",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
-        return
 
-# обработка кнопок: повод, стиль, настроение
+
+# Подробности: повод, стиль, настроение
 async def callback_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     user_id = query.from_user.id
-
     if user_id not in users:
-        users[user_id] = {}
+        users[user_id] = {"remaining":1}
 
     data = query.data
 
     # повод
-    if data in ["birthday", "wedding_occasion", "love", "funny", "thanks", "event"]:
+    if data in ["birthday","wedding_occasion","love","funny","thanks","event"]:
         users[user_id]["occasion"] = data
         users[user_id]["step"] = "description"
-        await query.message.reply_text(
-            "Расскажи немного о человеке / паре / компании"
-        )
+        await query.message.reply_text("Расскажи немного о человеке / паре / компании")
         return
 
     # стиль
     if data.startswith("style_"):
-        users[user_id]["style"] = data.replace("style_", "")
+        users[user_id]["style"] = data.replace("style_","")
         users[user_id]["step"] = "mood"
         keyboard = [
             [InlineKeyboardButton("❤️ Романтичная", callback_data="mood_romantic")],
             [InlineKeyboardButton("🥹 Трогательная", callback_data="mood_touching")],
             [InlineKeyboardButton("😂 Смешная", callback_data="mood_funny")],
             [InlineKeyboardButton("🔥 Энергичная", callback_data="mood_energy")],
-            [InlineKeyboardButton("✨ Другое", callback_data="mood_other")],
+            [InlineKeyboardButton("✨ Другое", callback_data="mood_other")]
         ]
         await query.message.reply_text(
             "Настроение песни?",
@@ -142,13 +150,19 @@ async def callback_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # настроение
+    # настроение и генерация
     if data.startswith("mood_"):
-        mood = data.replace("mood_", "")
+        mood = data.replace("mood_","")
         users[user_id]["mood"] = mood
-        # соберём промт
+
+        if users[user_id]["remaining"] <= 0:
+            await offer_packages(query,user_id)
+            return
+        users[user_id]["remaining"] -= 1
+
+        # формируем промт
         u = users[user_id]
-        prompt = f"""
+        prompt_text = f"""
 Создай песню:
 
 Для: {u.get('name')}
@@ -157,25 +171,72 @@ async def callback_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
 Стиль: {u.get('style')}
 Настроение: {u.get('mood')}
 """
-        await query.message.reply_text("🎵 Песня создается...\n\nПромт для Suno:\n" + prompt)
-        # сброс для нового трека
+
+        # Генерация через Suno API
+        headers = {
+            "Authorization": f"Bearer {SUNO_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        data = {
+            "prompt": prompt_text,
+            "voice": "default",  # можно изменить
+            "format": "mp3"
+        }
+
+        response = requests.post("https://api.suno.ai/generate", json=data, headers=headers)
+        if response.status_code == 200:
+            audio_url = response.json().get("url")
+            if audio_url:
+                await query.message.reply_audio(audio_url, caption="Вот твоя песня! 🎵")
+            else:
+                await query.message.reply_text("Ошибка Suno: не получен аудио файл.")
+        else:
+            await query.message.reply_text(f"Ошибка Suno: {response.text}")
+
         users[user_id]["step"] = None
 
-# основной запуск
-async def main():
-    app = Application.builder().token(TOKEN).build()
 
+# Предложение купить пакет
+async def offer_packages(query, user_id):
+    keyboard = [
+        [InlineKeyboardButton(f"1 песня – {PACKAGES['1']}₽", callback_data="buy_1")],
+        [InlineKeyboardButton(f"3 песни – {PACKAGES['3']}₽", callback_data="buy_3")],
+        [InlineKeyboardButton(f"10 песен – {PACKAGES['10']}₽", callback_data="buy_10")],
+        [InlineKeyboardButton(f"50 песен – {PACKAGES['50']}₽", callback_data="buy_50")]
+    ]
+    await query.message.reply_text(
+        "У тебя закончились бесплатные генерации. Выбери пакет:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+# Robokassa ссылка
+def get_robokassa_link(user_id, package):
+    price = PACKAGES[package]
+    invoice_id = f"{user_id}_{package}"
+    return f"https://auth.robokassa.ru/Merchant/Index.aspx?MrchLogin={ROBOKASSA_LOGIN}&OutSum={price}&InvId={invoice_id}&Desc=Пакет песен {package}&SignatureValue={ROBOKASSA_PASS1}"
+
+# Обработка покупки
+async def package_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    if query.data.startswith("buy_"):
+        package = query.data.split("_")[1]
+        link = get_robokassa_link(user_id, package)
+        await query.message.reply_text(f"Оплатите пакет здесь: {link}")
+
+# Запуск
+async def main():
+    app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(buttons, pattern="^(create_song|lover|friend|wedding|company|other)$"))
     app.add_handler(CallbackQueryHandler(callback_details, pattern="^(birthday|wedding_occasion|love|funny|thanks|event|style_|mood_)"))
+    app.add_handler(CallbackQueryHandler(package_purchase, pattern="^buy_"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, messages))
-
     print("Bot started")
-
     await app.initialize()
     await app.start()
     await app.updater.start_polling()
-
     while True:
         await asyncio.sleep(3600)
 
