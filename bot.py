@@ -1,9 +1,10 @@
 import os
 import asyncio
-import requests
+import aiohttp
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
+    Application, CommandHandler, CallbackQueryHandler,
+    MessageHandler, filters, ContextTypes
 )
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -33,6 +34,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 Нажми кнопку ниже чтобы начать."""
     await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+
 
 # ----- Выбор типа получателя -----
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -68,6 +70,7 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.reply_text("Название компании\nПример: Coffeelab")
         else:
             await query.message.reply_text("Как зовут человека?\nПример: Оля")
+
 
 # ----- Обработка текстовых ответов -----
 async def messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -110,6 +113,7 @@ async def messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
 
+
 # ----- Подробности: повод, стиль, настроение -----
 async def callback_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -146,8 +150,7 @@ async def callback_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # настроение и генерация
     if data.startswith("mood_"):
-        mood = data.replace("mood_","")
-        users[user_id]["mood"] = mood
+        users[user_id]["mood"] = data.replace("mood_","")
 
         if users[user_id]["remaining"] <= 0:
             await offer_packages(query,user_id)
@@ -166,41 +169,36 @@ async def callback_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
 Настроение: {u.get('mood')}
 """
 
-        # ---- Suno API (новый endpoint) ----
-        headers = {
-            "Authorization": f"Bearer {SUNO_API_KEY}",
-            "Content-Type": "application/json"
-        }
-        payload = {
-            "prompt": prompt_text,
-            "voice": "default",
-            "format": "mp3"
-        }
-
-        # ---- Попытка 3 раза если Suno недоступен ----
-        for attempt in range(3):
-            try:
-                response = requests.post("https://api.sunoapi.org/api/v1/generate", json=payload, headers=headers, timeout=60)
-                response.raise_for_status()
-                data = response.json()
-                audio_url = data.get("audio_url") or data.get("url")
-                if audio_url:
-                    await query.message.reply_audio(audio_url, caption="Вот твоя песня! 🎵")
-                    break
-                else:
-                    if attempt < 2:
-                        await query.message.reply_text("Сервис Suno временно недоступен. Повторная попытка...")
-                        await asyncio.sleep(5)
+        # ---- Suno API через aiohttp ----
+        async with aiohttp.ClientSession() as session:
+            for attempt in range(5):
+                try:
+                    async with session.post(
+                        "https://api.sunoapi.org/api/v1/generate",
+                        json={"prompt":prompt_text,"voice":"default","format":"mp3"},
+                        headers={"Authorization": f"Bearer {SUNO_API_KEY}"}
+                    ) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            audio_url = data.get("audio_url") or data.get("url")
+                            if audio_url:
+                                await query.message.reply_audio(audio_url, caption="Вот твоя песня! 🎵")
+                                break
+                        else:
+                            if attempt < 4:
+                                await query.message.reply_text("Suno временно недоступен. Повторная попытка через 15 секунд...")
+                                await asyncio.sleep(15)
+                            else:
+                                await query.message.reply_text("Suno временно недоступен. Попробуй позже.")
+                except Exception as e:
+                    if attempt < 4:
+                        await query.message.reply_text("Suno временно недоступен. Повторная попытка через 15 секунд...")
+                        await asyncio.sleep(15)
                     else:
-                        await query.message.reply_text("Сервис Suno временно недоступен. Попробуй позже.")
-            except requests.exceptions.RequestException:
-                if attempt < 2:
-                    await query.message.reply_text("Сервис Suno временно недоступен. Повторная попытка...")
-                    await asyncio.sleep(5)
-                else:
-                    await query.message.reply_text("Сервис Suno временно недоступен. Попробуй позже.")
+                        await query.message.reply_text("Suno временно недоступен. Попробуй позже.")
 
         users[user_id]["step"] = None
+
 
 # ----- Предложение купить пакет -----
 async def offer_packages(query, user_id):
@@ -215,11 +213,13 @@ async def offer_packages(query, user_id):
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
+
 # ----- Robokassa -----
 def get_robokassa_link(user_id, package):
     price = PACKAGES[package]
     invoice_id = f"{user_id}_{package}"
     return f"https://auth.robokassa.ru/Merchant/Index.aspx?MrchLogin={ROBOKASSA_LOGIN}&OutSum={price}&InvId={invoice_id}&Desc=Пакет песен {package}&SignatureValue={ROBOKASSA_PASS1}"
+
 
 async def package_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -229,6 +229,7 @@ async def package_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE):
         package = query.data.split("_")[1]
         link = get_robokassa_link(user_id, package)
         await query.message.reply_text(f"Оплатите пакет здесь: {link}")
+
 
 # ----- Запуск -----
 async def main():
@@ -245,6 +246,6 @@ async def main():
     while True:
         await asyncio.sleep(3600)
 
+
 if __name__ == "__main__":
-    asyncio.run(main())
     asyncio.run(main())
