@@ -1,85 +1,156 @@
 import os
-import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 
 TOKEN = os.getenv("BOT_TOKEN")
 
-user_data_store = {}
+users = {}
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
     keyboard = [[InlineKeyboardButton("🎵 Создать песню", callback_data="create_song")]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
 
-    text = (
-        "🎵 Привет!\n\n"
-        "Я создаю персональные песни.\n"
-        "Первая песня бесплатно.\n\n"
-        "Нажми кнопку ниже чтобы создать песню."
-    )
+    text = """
+🎵 Привет!
 
-    await update.message.reply_text(text, reply_markup=reply_markup)
+Я создаю персональные песни.
 
+Первая песня — бесплатно.
 
-async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+Ответь на несколько вопросов и я создам песню для тебя.
+"""
 
-    query = update.callback_query
-    await query.answer()
-
-    keyboard = [
-        [InlineKeyboardButton("❤️ Для любимого человека", callback_data="lover")],
-        [InlineKeyboardButton("🎂 Для друга", callback_data="friend")],
-        [InlineKeyboardButton("💍 Свадебная песня", callback_data="wedding")],
-        [InlineKeyboardButton("🎉 Для компании", callback_data="company")],
-        [InlineKeyboardButton("✨ Другое", callback_data="other")]
-    ]
-
-    await query.message.reply_text(
-        "Для кого будет песня?",
+    await update.message.reply_text(
+        text,
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-    user_id = update.message.from_user.id
+    query = update.callback_query
+    await query.answer()
 
-    if user_id not in user_data_store:
-        user_data_store[user_id] = {}
+    user_id = query.from_user.id
 
-    text = update.message.text
+    if user_id not in users:
+        users[user_id] = {}
 
-    if "name" not in user_data_store[user_id]:
+    if query.data == "create_song":
 
-        user_data_store[user_id]["name"] = text
-        await update.message.reply_text("Какой повод для песни?")
-        return
+        keyboard = [
+            [InlineKeyboardButton("❤️ Для любимого человека", callback_data="lover")],
+            [InlineKeyboardButton("🎂 Для друга", callback_data="friend")],
+            [InlineKeyboardButton("💍 Свадебная песня", callback_data="wedding")],
+            [InlineKeyboardButton("🎉 Для компании", callback_data="company")],
+            [InlineKeyboardButton("✨ Другое", callback_data="other")]
+        ]
 
-    if "occasion" not in user_data_store[user_id]:
+        await query.message.reply_text(
+            "Для кого будет песня?",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
 
-        user_data_store[user_id]["occasion"] = text
-        await update.message.reply_text("Расскажи немного о человеке / паре")
-        return
+    elif query.data in ["lover","friend","wedding","company","other"]:
 
-    if "description" not in user_data_store[user_id]:
+        users[user_id]["recipient_type"] = query.data
 
-        user_data_store[user_id]["description"] = text
-        await update.message.reply_text("Стиль песни? (Поп / Рэп / Рок)")
-        return
+        if query.data == "wedding":
 
-    if "style" not in user_data_store[user_id]:
+            await query.message.reply_text(
+                "Как зовут пару?\n\nПример: Оля и Дима"
+            )
 
-        user_data_store[user_id]["style"] = text
-        await update.message.reply_text("Настроение песни?")
-        return
+        elif query.data == "company":
 
-    if "mood" not in user_data_store[user_id]:
+            await query.message.reply_text(
+                "Название компании\n\nПример: Coffeelab"
+            )
 
-        user_data_store[user_id]["mood"] = text
+        else:
 
-        data = user_data_store[user_id]
+            await query.message.reply_text(
+                "Как зовут человека?\n\nПример: Оля"
+            )
 
-        prompt = f"""
+        users[user_id]["step"] = "name"
+
+    elif query.data == "birthday":
+
+        users[user_id]["occasion"] = "День рождения"
+        users[user_id]["step"] = "description"
+
+        await query.message.reply_text(
+            "Расскажи немного о человеке / паре / компании"
+        )
+
+    elif query.data == "style_pop":
+
+        users[user_id]["style"] = "Поп"
+        users[user_id]["step"] = "mood"
+
+        await send_mood(query)
+
+    elif query.data == "mood_romantic":
+
+        users[user_id]["mood"] = "Романтичная"
+        await generate_prompt(query, user_id)
+
+
+async def send_occasion(update):
+
+    keyboard = [
+        [InlineKeyboardButton("🎂 День рождения", callback_data="birthday")],
+        [InlineKeyboardButton("💍 Свадьба", callback_data="wedding_occasion")],
+        [InlineKeyboardButton("❤️ Признание в любви", callback_data="love")],
+        [InlineKeyboardButton("😂 Шуточная песня", callback_data="funny")],
+        [InlineKeyboardButton("🙏 Благодарность", callback_data="thanks")],
+        [InlineKeyboardButton("🎉 Праздник / событие", callback_data="event")]
+    ]
+
+    await update.message.reply_text(
+        "Какой повод для песни?",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+
+async def send_style(update):
+
+    keyboard = [
+        [InlineKeyboardButton("Поп", callback_data="style_pop")],
+        [InlineKeyboardButton("Рэп", callback_data="style_rap")],
+        [InlineKeyboardButton("Рок", callback_data="style_rock")],
+        [InlineKeyboardButton("Душевная баллада", callback_data="style_ballad")],
+        [InlineKeyboardButton("Весёлая песня", callback_data="style_fun")],
+        [InlineKeyboardButton("Современный хит", callback_data="style_hit")]
+    ]
+
+    await update.message.reply_text(
+        "Выберите стиль песни",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+
+async def send_mood(query):
+
+    keyboard = [
+        [InlineKeyboardButton("❤️ Романтичная", callback_data="mood_romantic")],
+        [InlineKeyboardButton("🥹 Трогательная", callback_data="mood_touching")],
+        [InlineKeyboardButton("😂 Смешная", callback_data="mood_funny")],
+        [InlineKeyboardButton("🔥 Энергичная", callback_data="mood_energy")]
+    ]
+
+    await query.message.reply_text(
+        "Настроение песни?",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+
+async def generate_prompt(query, user_id):
+
+    data = users[user_id]
+
+    prompt = f"""
 Create a song.
 
 Name: {data['name']}
@@ -89,30 +160,49 @@ Style: {data['style']}
 Mood: {data['mood']}
 """
 
-        await update.message.reply_text(
-            "🎵 Песня создается...\n\nПромт для Suno:\n" + prompt
-        )
+    await query.message.reply_text(
+        "🎵 Песня создается...\n\nПромт для Suno:\n\n" + prompt
+    )
 
 
-async def main():
+async def messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    user_id = update.message.from_user.id
+
+    if user_id not in users:
+        users[user_id] = {}
+
+    text = update.message.text
+
+    step = users[user_id].get("step")
+
+    if step == "name":
+
+        users[user_id]["name"] = text
+        users[user_id]["step"] = "occasion"
+
+        await send_occasion(update)
+
+    elif step == "description":
+
+        users[user_id]["description"] = text
+        users[user_id]["step"] = "style"
+
+        await send_style(update)
+
+
+def main():
 
     app = Application.builder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(button))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.add_handler(CallbackQueryHandler(buttons))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, messages))
 
     print("Bot started")
 
-    await app.initialize()
-    await app.start()
-    await app.updater.start_polling()
-
-    while True:
-        await asyncio.sleep(3600)
+    app.run_polling()
 
 
-if __name__ == "__main__":
-    asyncio.run(main())
 if __name__ == "__main__":
     main()
