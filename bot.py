@@ -1,16 +1,20 @@
 import os
-import asyncio
 import aiohttp
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from threading import Thread
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    CallbackQueryHandler,
+    MessageHandler,
+    filters,
+    ContextTypes
+)
 
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 SUNO_API_KEY = os.getenv("SUNO_API_KEY")
-
-users = {}
 
 # ---------------- HTTP SERVER (для Render) ----------------
 
@@ -27,7 +31,7 @@ def run_web():
 
 Thread(target=run_web).start()
 
-# ---------------- SUNO GENERATION ----------------
+# ---------------- SUNO ----------------
 
 async def generate_song(prompt):
 
@@ -39,14 +43,12 @@ async def generate_song(prompt):
     }
 
     data = {
-        "prompt": prompt,
-        "style": "pop"
+        "prompt": prompt
     }
 
     async with aiohttp.ClientSession() as session:
         async with session.post(url, headers=headers, json=data) as r:
-            result = await r.json()
-            return result
+            return await r.json()
 
 # ---------------- BOT ----------------
 
@@ -58,33 +60,37 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
 
     await update.message.reply_text(
-        "🎶 Добро пожаловать в AI Song Bot\n\nСоздай свою уникальную песню!",
+        "🎶 Добро пожаловать в AI Song Bot\n\nНажми кнопку чтобы создать песню",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
 
-async def buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-    keyboard = [
-        [InlineKeyboardButton("1 песня — 249₽", callback_data="p1")],
-        [InlineKeyboardButton("3 песни — 599₽", callback_data="p3")],
-        [InlineKeyboardButton("10 песен — 1490₽", callback_data="p10")],
-        [InlineKeyboardButton("50 песен — 4990₽", callback_data="p50")]
-    ]
+    query = update.callback_query
+    await query.answer()
 
-    await update.callback_query.edit_message_text(
-        "Выбери пакет:",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
+    if query.data == "create":
 
+        context.user_data["wait_prompt"] = True
 
-async def create(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        await query.message.reply_text(
+            "Напиши описание песни\n\nНапример:\nромантическая песня для девушки"
+        )
 
-    await update.callback_query.message.reply_text(
-        "Напиши описание песни\n\nНапример:\nпесня для девушки в стиле романтический поп"
-    )
+    if query.data == "buy":
 
-    context.user_data["wait_prompt"] = True
+        keyboard = [
+            [InlineKeyboardButton("1 песня — 249₽", callback_data="p1")],
+            [InlineKeyboardButton("3 песни — 599₽", callback_data="p3")],
+            [InlineKeyboardButton("10 песен — 1490₽", callback_data="p10")],
+            [InlineKeyboardButton("50 песен — 4990₽", callback_data="p50")]
+        ]
+
+        await query.message.reply_text(
+            "Выбери пакет:",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
 
 
 async def message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -100,39 +106,20 @@ async def message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if "audio_url" in result:
             await update.message.reply_audio(result["audio_url"])
         else:
-            await update.message.reply_text("❌ Ошибка генерации")
+            await update.message.reply_text("❌ Не удалось создать песню")
 
         context.user_data["wait_prompt"] = False
 
 
-async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    query = update.callback_query
-    await query.answer()
-
-    if query.data == "create":
-        await create(update, context)
-
-    elif query.data == "buy":
-        await buy(update, context)
-
+# ---------------- MAIN ----------------
 
 def main():
 
     app = Application.builder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(buttons))
-    app.add_handler(CommandHandler("buy", buy))
-    app.add_handler(CallbackQueryHandler(buttons))
-    app.add_handler(CommandHandler("create", create))
-
-    app.add_handler(
-        telegram.ext.MessageHandler(
-            telegram.ext.filters.TEXT,
-            message
-        )
-    )
+    app.add_handler(CallbackQueryHandler(button))
+    app.add_handler(MessageHandler(filters.TEXT, message))
 
     print("Bot started")
 
